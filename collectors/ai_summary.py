@@ -1,8 +1,8 @@
-"""Gemini API（Google AI Studio の無料枠）で週次の資金フローを初心者向けに要約する。
+"""GitHub Models で週次の資金フローを初心者向けに要約する。
 
-GitHub のリポジトリ Secrets に GEMINI_API_KEY を登録し、ワークフローから環境変数で渡す。
-モデル名は頻繁に変わるので、使えるモデル一覧を取得して Flash 系を自動で選ぶ。
-キーが無い・AIが失敗した場合は None を返し、データ取得自体は止めない。
+GitHub Actions 上では、ワークフローに `permissions: models: read` を書き、
+GITHUB_TOKEN を環境変数で渡すだけで使える（APIキーの登録は不要）。
+トークンが無い・AIが失敗した場合は None を返し、データ取得自体は止めない。
 """
 from __future__ import annotations
 
@@ -14,10 +14,8 @@ from datetime import datetime, timezone
 
 import requests
 
-API_BASE = "https://generativelanguage.googleapis.com/v1beta"
-# 一覧取得に失敗したときの予備（存在しない名前は自動で飛ばされる）
-FALLBACK_MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash"]
-_EXCLUDE = ("image", "tts", "audio", "live", "embedding", "vision", "thinking-exp", "native")
+ENDPOINT = "https://models.github.ai/inference/chat/completions"
+DEFAULT_MODELS = ["openai/gpt-4.1-mini", "openai/gpt-4o-mini"]
 
 MARKET_LABELS = {
     "JPY": "日本円", "EUR": "ユーロ", "SP500": "米国株S&P500",
@@ -117,41 +115,26 @@ def _valid(d: dict) -> bool:
 LAST_ERROR = ""  # 失敗理由（latest_summary.json に書き出してスマホから確認できるようにする）
 
 
-def _version_key(name: str) -> tuple:
-    nums = re.findall(r"\d+(?:\.\d+)?", name)
-    ver = float(nums[0]) if nums else 0.0
-    lite = "lite" in name
-    preview = "preview" in name or "exp" in name
-    # 新しい版を優先、正式版を優先、Flash を Flash-Lite より優先
-    return (-ver, preview, lite, name)
-
-
-def list_flash_models(key: str) -> list[str]:
-    resp = requests.get(f"{API_BASE}/models", params={"pageSize": 200},
-                        headers={"x-goog-api-key": key}, timeout=30)
-    resp.raise_for_status()
-    names = []
-    for m in resp.json().get("models", []):
-        name = m.get("name", "").removeprefix("models/")
-        if ("generateContent" in m.get("supportedGenerationMethods", [])
-                and name.startswith("gemini") and "flash" in name
-                and not any(x in name for x in _EXCLUDE)):
-            names.append(name)
-    return sorted(set(names), key=_version_key)
-
-
-def _call(key: str, model: str, context: dict, json_mode: bool) -> dict:
-    gen = {"temperature": 0.3}
+def _call(token: str, model: str, context: dict, json_mode: bool) -> dict:
+    body = {
+        "model": model,
+        "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+        ],
+    }
     if json_mode:
-        gen["responseMimeType"] = "application/json"
+        body["response_format"] = {"type": "json_object"}
     resp = requests.post(
-        f"{API_BASE}/models/{model}:generateContent",
-        headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-        json={
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"role": "user", "parts": [{"text": json.dumps(context, ensure_ascii=False)}]}],
-            "generationConfig": gen,
+        ENDPOINT,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
         },
+        json=body,
         timeout=90,
     )
     head = resp.text[:200].replace("\n", " ")
@@ -160,10 +143,10 @@ def _call(key: str, model: str, context: dict, json_mode: bool) -> dict:
     try:
         payload = resp.json()
     except ValueError:
-        raise RuntimeError(f"応答がJSONではない (HTTP {resp.status_code}): {head!r}")
-    parts = payload["candidates"][0]["content"]["parts"]
-    text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
-    data = _parse_json(text)
+        ctype = resp.headers.get("Content-Type", "?")
+        raise RuntimeError(f"応答がJSONではない (HTTP {resp.status_code}, {ctype}): {head!r}")
+    content = payload["choices"][0]["message"]["content"]
+    data = _parse_json(content)
     if not _valid(data):
         raise RuntimeError(f"出力形式が想定外: {str(data)[:200]}")
     return data
@@ -172,30 +155,24 @@ def _call(key: str, model: str, context: dict, json_mode: bool) -> dict:
 def summarize(mof_rows: list[dict], cftc_rows: list[dict]) -> dict | None:
     global LAST_ERROR
     LAST_ERROR = ""
-    key = os.getenv("GEMINI_API_KEY", "").strip()
-    if not key:
-        LAST_ERROR = "GEMINI_API_KEY が登録されていない（リポジトリの Secrets を確認）"
-        log.info(LAST_ERROR)
+    token = os.getenv("GITHUB_TOKEN")
+    if not token:
+        LAST_ERROR = "GITHUB_TOKEN が渡されていない"
+        log.info("GITHUB_TOKEN が無いので AI 要約はスキップ")
         return None
     if not mof_rows:
         LAST_ERROR = "財務省データが無い"
         return None
 
     context = build_context(mof_rows, cftc_rows)
-    errors = []
-    try:
-        found = list_flash_models(key)
-    except Exception as e:
-        found = []
-        errors.append(f"モデル一覧の取得に失敗: {str(e)[:150]}")
     seen: set[str] = set()
-    models = [m for m in [os.getenv("MONEYFLOW_AI_MODEL")] + found[:3] + FALLBACK_MODELS
+    models = [m for m in [os.getenv("MONEYFLOW_AI_MODEL")] + DEFAULT_MODELS
               if m and not (m in seen or seen.add(m))]
-
-    for model in models[:5]:
-        for json_mode in (True, False):
+    errors = []
+    for model in models:
+        for json_mode in (True, False):  # JSONモード非対応のモデルに備えて、外した形でも試す
             try:
-                data = _call(key, model, context, json_mode)
+                data = _call(token, model, context, json_mode)
                 return {
                     "headline": data["headline"].strip(),
                     "points": [p.strip() for p in data["points"] if p.strip()][:5],
@@ -207,11 +184,6 @@ def summarize(mof_rows: list[dict], cftc_rows: list[dict]) -> dict | None:
             except Exception as e:
                 msg = f"{model}{'' if json_mode else '(json無し)'}: {e}"
                 log.warning("AI 失敗 %s", msg)
-                errors.append(msg[:250])
-                if "HTTP 400" in str(e) and "API key" in str(e):
-                    LAST_ERROR = " / ".join(errors)
-                    return None  # キーが無効なら他のモデルを試しても無駄
-                if "HTTP 404" in str(e) or "HTTP 429" in str(e) or "HTTP 403" in str(e):
-                    break  # このモデルは使えないので次のモデルへ
+                errors.append(msg[:300])
     LAST_ERROR = " / ".join(errors)
     return None
