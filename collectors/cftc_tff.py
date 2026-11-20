@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import requests
 
@@ -42,7 +43,7 @@ def _pick(rec: dict, candidates: list[str]) -> float | None:
     return None
 
 
-def fetch_market(code: str, pattern: str, since: str, timeout: int = 30) -> list[dict]:
+def fetch_market(code: str, pattern: str, since: str, timeout: int = 60) -> list[dict]:
     params = {
         "$where": (
             f"report_date_as_yyyy_mm_dd >= '{since}' "
@@ -51,9 +52,19 @@ def fetch_market(code: str, pattern: str, since: str, timeout: int = 30) -> list
         "$order": "report_date_as_yyyy_mm_dd ASC",
         "$limit": 5000,
     }
-    resp = requests.get(TFF_URL, params=params, timeout=timeout)
-    resp.raise_for_status()
-    records = resp.json()
+    last_err: Exception | None = None
+    for attempt in range(3):  # CFTC のサーバーは時々応答が遅いので、待ってから再試行
+        try:
+            resp = requests.get(TFF_URL, params=params, timeout=timeout)
+            resp.raise_for_status()
+            records = resp.json()
+            break
+        except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
+            last_err = e
+            log.warning("CFTC %s 取得失敗（%d回目）: %s", code, attempt + 1, e)
+            time.sleep(10 * (attempt + 1))
+    else:
+        raise last_err
     if not records:
         log.warning("CFTC: %s に一致する市場がありません（%s）", code, pattern)
 
