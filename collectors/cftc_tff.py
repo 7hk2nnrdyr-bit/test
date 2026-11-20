@@ -43,7 +43,7 @@ def _pick(rec: dict, candidates: list[str]) -> float | None:
     return None
 
 
-def fetch_market(code: str, pattern: str, since: str, timeout: int = 60) -> list[dict]:
+def fetch_market(code: str, pattern: str, since: str, timeout: int = 40) -> list[dict]:
     params = {
         "$where": (
             f"report_date_as_yyyy_mm_dd >= '{since}' "
@@ -53,7 +53,7 @@ def fetch_market(code: str, pattern: str, since: str, timeout: int = 60) -> list
         "$limit": 5000,
     }
     last_err: Exception | None = None
-    for attempt in range(3):  # CFTC のサーバーは時々応答が遅いので、待ってから再試行
+    for attempt in range(2):  # CFTC のサーバーは時々応答が遅いので、1回だけ待って再試行
         try:
             resp = requests.get(TFF_URL, params=params, timeout=timeout)
             resp.raise_for_status()
@@ -62,7 +62,8 @@ def fetch_market(code: str, pattern: str, since: str, timeout: int = 60) -> list
         except (requests.Timeout, requests.ConnectionError, requests.HTTPError) as e:
             last_err = e
             log.warning("CFTC %s 取得失敗（%d回目）: %s", code, attempt + 1, e)
-            time.sleep(10 * (attempt + 1))
+            if attempt == 0:
+                time.sleep(10)
     else:
         raise last_err
     if not records:
@@ -92,9 +93,17 @@ def fetch_market(code: str, pattern: str, since: str, timeout: int = 60) -> list
     return rows
 
 
-def collect(since: str = "2020-01-01") -> list[dict]:
+def collect(since: str = "2020-01-01", budget_sec: int = 240) -> list[dict]:
+    """全市場を取得する。サーバーが応答しない日は早めに打ち切り、例外を投げる。
+
+    打ち切った場合、呼び出し側（pipeline）は前回保存したデータで続行する。
+    1市場でも取得に失敗したら、残りも同じ状態とみなして試さない。
+    """
+    start = time.monotonic()
     rows: list[dict] = []
     for code, pattern in MARKETS.items():
+        if time.monotonic() - start > budget_sec:
+            raise TimeoutError(f"CFTC の応答が遅いため {budget_sec} 秒で打ち切り")
         rows.extend(fetch_market(code, pattern, since))
     return rows
 
