@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>お金の流れ 週次ダッシュボード</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💴</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #eef1f0; --panel: #ffffff; --ink: #18222b; --sub: #5a6873; --rule: #d3dad8;
+  --buy: #2e5e8c; --sell: #b87420; --accent2: #6b4c9a; --axis: #98a4ab;
+  color-scheme: light;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11171c; --panel: #182128; --ink: #e5ebee; --sub: #9aa8b1; --rule: #2a363f;
+    --buy: #6fa3d6; --sell: #e0a24f; --accent2: #b39ae0; --axis: #5d6a73;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11171c; --panel: #182128; --ink: #e5ebee; --sub: #9aa8b1; --rule: #2a363f;
+  --buy: #6fa3d6; --sell: #e0a24f; --accent2: #b39ae0; --axis: #5d6a73;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  font-size: 16px; line-height: 1.75; font-feature-settings: "palt";
+}
+main { max-width: 960px; margin: 0 auto; padding: 24px 20px 64px; }
+header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+header h1 { font-size: 15px; font-weight: 700; margin: 0; color: var(--sub); }
+header p { margin: 0; font-size: 13px; color: var(--sub); }
+.num { font-variant-numeric: tabular-nums; }
+
+.hero { margin: 28px 0 8px; }
+.hero p { margin: 0; font-size: clamp(20px, 4.2vw, 30px); line-height: 1.5; font-weight: 700; max-width: 30em; }
+.hero .amount { font-size: clamp(34px, 8vw, 58px); letter-spacing: -0.01em; display: inline-block; }
+.hero .buy { color: var(--buy); } .hero .sell { color: var(--sell); }
+.hero small { display: block; margin-top: 6px; font-size: 14px; font-weight: 400; color: var(--sub); }
+
+.flows { margin: 28px 0 40px; border-top: 2px solid var(--ink); }
+.flow { display: grid; grid-template-columns: 9.5em 1fr; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.flow .who { font-size: 14px; line-height: 1.4; }
+.flow .who span { display: block; font-size: 12px; color: var(--sub); }
+.track { position: relative; height: 30px; }
+.track::before { content: ""; position: absolute; left: 50%; top: -6px; bottom: -6px; width: 1px; background: var(--axis); }
+.bar { position: absolute; top: 7px; height: 16px; }
+.bar.buy { left: 50%; background: var(--buy); }
+.bar.sell { right: 50%; background: var(--sell); }
+.val { position: absolute; top: 4px; font-size: 13px; white-space: nowrap; }
+.val.buy { color: var(--buy); } .val.sell { color: var(--sell); }
+.flows-legend { display: grid; grid-template-columns: 9.5em 1fr; gap: 12px; font-size: 12px; color: var(--sub); padding-top: 6px; }
+.flows-legend div { display: flex; justify-content: space-between; }
+
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 24px; }
+.controls span { font-size: 13px; color: var(--sub); margin-right: 4px; }
+button, select {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--panel);
+  border: 1px solid var(--rule); border-radius: 6px; padding: 6px 14px; cursor: pointer;
+}
+button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--buy); outline-offset: 2px; }
+
+section.chart { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 20px 20px 14px; margin-bottom: 20px; }
+section.chart h2 { font-size: 17px; margin: 0; }
+section.chart .lede { font-size: 14px; color: var(--sub); margin: 4px 0 14px; max-width: 40em; }
+section.chart .head { display: flex; justify-content: space-between; align-items: start; gap: 12px; flex-wrap: wrap; }
+.canvas-wrap { position: relative; height: 300px; }
+
+.notice { background: var(--panel); border: 1px solid var(--sell); border-radius: 10px; padding: 18px 20px; margin: 24px 0; }
+.notice h2 { font-size: 16px; margin: 0 0 6px; }
+.notice p { margin: 0 0 10px; font-size: 14px; }
+.notice label { display: block; font-size: 14px; margin-top: 8px; }
+
+footer { font-size: 13px; color: var(--sub); margin-top: 32px; border-top: 1px solid var(--rule); padding-top: 16px; }
+footer p { margin: 0 0 6px; max-width: 46em; }
+footer a { color: inherit; }
+[hidden] { display: none !important; }
+
+@media (max-width: 560px) {
+  main { padding: 16px 14px 48px; }
+  .flow, .flows-legend { grid-template-columns: 7em 1fr; }
+  .canvas-wrap { height: 240px; }
+  section.chart { padding: 16px 12px 10px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>お金の流れ 週次ダッシュボード</h1>
+    <p id="updated" class="num"></p>
+  </header>
+
+  <div id="loadError" class="notice" hidden>
+    <h2>データを読み込めませんでした</h2>
+    <p id="loadErrorMsg"></p>
+    <p>GitHub Actions で一度データ取得を実行してから、GitHub Pages で開いてください。手元で確認する場合は、下で CSV を選ぶと表示できます。</p>
+    <label>財務省 週次（mof_weekly.csv）<br><input type="file" id="fileMof" accept=".csv"></label>
+    <label>CFTC（cftc_tff.csv、任意）<br><input type="file" id="fileCftc" accept=".csv"></label>
+  </div>
+
+  <div id="app" hidden>
+    <div class="hero" id="hero"></div>
+
+    <div class="flows" id="flows" aria-label="最新週の資金の向き"></div>
+
+    <div class="controls" role="group" aria-label="表示期間">
+      <span>期間</span>
+      <button type="button" data-range="52" aria-pressed="false">1年</button>
+      <button type="button" data-range="156" aria-pressed="true">3年</button>
+      <button type="button" data-range="520" aria-pressed="false">10年</button>
+      <button type="button" data-range="0" aria-pressed="false">全期間</button>
+    </div>
+
+    <section class="chart">
+      <h2>海外勢は日本株を買っているか</h2>
+      <p class="lede">棒は週ごとの買い越し・売り越し、線は選んだ期間の累計です。累計が上向きなら海外マネーが流入し続けています。</p>
+      <div class="canvas-wrap"><canvas id="cForeignEq" role="img" aria-label="海外勢の日本株売買の推移"></canvas></div>
+    </section>
+
+    <section class="chart" id="secCombo">
+      <h2>海外勢の日本株と、円への投機ポジション</h2>
+      <p class="lede">線はヘッジファンド等の円先物の持ち高（＋は円買い、−は円売り）。円売りと日本株買いが同時に進む局面は、円安を前提にした日本株買いのことが多いです。</p>
+      <div class="canvas-wrap"><canvas id="cCombo" role="img" aria-label="海外勢の日本株売買と円の投機ポジションの比較"></canvas></div>
+    </section>
+
+    <section class="chart" id="secCftc">
+      <div class="head">
+        <div>
+          <h2>先物市場の持ち高</h2>
+          <p class="lede">ヘッジファンド等（短期の投機筋）と機関投資家（年金・運用会社）のネットの持ち高。単位は枚。</p>
+        </div>
+        <label>
+          <select id="market" aria-label="市場を選ぶ"></select>
+        </label>
+      </div>
+      <div class="canvas-wrap"><canvas id="cCftc" role="img" aria-label="先物市場の投資家別ネットポジション"></canvas></div>
+    </section>
+
+    <section class="chart">
+      <h2>国内勢は海外に何を買っているか</h2>
+      <p class="lede">日本の投資家による外国株と外国債券の買い越し・売り越し。新NISAなどで外国株買いが続くと、円売り圧力になります。</p>
+      <div class="canvas-wrap"><canvas id="cDomestic" role="img" aria-label="国内勢の外国株と外国債券の売買の推移"></canvas></div>
+    </section>
+  </div>
+
+  <footer>
+    <p>出典：財務省「対外及び対内証券売買契約等の状況（週次・指定報告機関ベース）」、米商品先物取引委員会（CFTC）Traders in Financial Futures。</p>
+    <p>財務省の数値は億円、＋は買い越し、−は売り越し。速報値のため後から改定されることがあります。資金フローは投資判断の参考情報で、それ単独で売買の根拠になるものではありません。</p>
+  </footer>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+(() => {
+  const MOF_URL = "data/curated/mof_weekly.csv";
+  const CFTC_URL = "data/curated/cftc_tff.csv";
+  const MARKET_LABELS = { JPY: "日本円", EUR: "ユーロ", SP500: "S&P500", UST10Y: "米10年債", NIKKEI_YEN: "日経平均（円建て）" };
+
+  const state = { mof: [], cftc: [], range: 156, market: "JPY", charts: {} };
+
+  function parseCSV(text) {
+    text = text.replace(/^\uFEFF/, "");
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+        else cell += c;
+      } else if (c === '"') q = true;
+      else if (c === ",") { row.push(cell); cell = ""; }
+      else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(cell); cell = ""; if (row.some(v => v !== "")) rows.push(row); row = [];
+      } else cell += c;
+    }
+    if (cell !== "" || row.length) { row.push(cell); rows.push(row); }
+    if (!rows.length) return [];
+    const head = rows[0];
+    return rows.slice(1).map(r => {
+      const o = {};
+      head.forEach((h, i) => {
+        const v = r[i] ?? "";
+        o[h] = v === "" ? null : (isNaN(Number(v)) ? v : Number(v));
+      });
+      return o;
+    });
+  }
+
+  function oku(v) {
+    if (v == null) return "—";
+    const a = Math.abs(Math.round(v));
+    const s = a >= 10000
+      ? `${Math.floor(a / 10000)}兆${(a % 10000) ? (a % 10000).toLocaleString("ja-JP") + "億" : ""}円`
+      : `${a.toLocaleString("ja-JP")}億円`;
+    return s;
+  }
+  const signed = v => v == null ? "—" : (v >= 0 ? "＋" : "−") + oku(v);
+  const md = iso => { const [, m, d] = iso.split("-"); return `${Number(m)}/${Number(d)}`; };
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function renderHero() {
+    const last = state.mof[state.mof.length - 1];
+    const prev4 = state.mof.slice(-4).reduce((s, r) => s + (r.in_equity_net || 0), 0);
+    const v = last.in_equity_net;
+    const verb = v >= 0 ? "買い越し" : "売り越し";
+    document.getElementById("hero").innerHTML =
+      `<p>${md(last.week_start)}〜${md(last.week_end)}の週、海外勢は日本株を<br>` +
+      `<span class="amount num ${v >= 0 ? "buy" : "sell"}">${oku(v)}</span> ${verb}。` +
+      `<small class="num">直近4週の合計は ${signed(prev4)}</small></p>`;
+    document.getElementById("updated").textContent = `財務省データ ${last.week_end.replaceAll("-", "/")} 週まで`;
+  }
+
+  function renderFlows() {
+    const last = state.mof[state.mof.length - 1];
+    const items = [
+      ["海外勢", "日本株", last.in_equity_net],
+      ["海外勢", "日本の債券", last.in_ltdebt_net],
+      ["国内勢", "外国株", last.out_equity_net],
+      ["国内勢", "外国の債券", last.out_ltdebt_net],
+    ];
+    const max = Math.max(1, ...items.map(i => Math.abs(i[2] || 0)));
+    const html = items.map(([who, what, v]) => {
+      const w = Math.abs(v || 0) / max * 46;
+      const buy = (v || 0) >= 0;
+      // 値は軸の反対側に置く（バーが長くても画面からはみ出さない）
+      const label = `<span class="val num ${buy ? "buy" : "sell"}" style="${buy ? "right:calc(50% + 8px)" : "left:calc(50% + 8px)"}">${signed(v)}</span>`;
+      return `<div class="flow"><div class="who">${who}<span>→ ${what}</span></div>` +
+        `<div class="track" role="img" aria-label="${who}の${what}は${signed(v)}">` +
+        `<div class="bar ${buy ? "buy" : "sell"}" style="width:${w}%"></div>${label}</div></div>`;
+    }).join("");
+    document.getElementById("flows").innerHTML = html +
+      `<div class="flows-legend"><span></span><div><span>← 売り越し</span><span>買い越し →</span></div></div>`;
+  }
+
+  function inRange() {
+    return state.range ? state.mof.slice(-state.range) : state.mof;
+  }
+
+  function baseOptions(extra = {}) {
+    const ink = css("--sub"), grid = css("--rule");
+    return {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: ink, boxWidth: 12, font: { family: "BIZ UDPGothic" } } },
+        tooltip: { callbacks: {} },
+      },
+      scales: {
+        x: { ticks: { color: ink, maxTicksLimit: 8, autoSkip: true }, grid: { display: false } },
+        y: { ticks: { color: ink }, grid: { color: grid } },
+      },
+      ...extra,
+    };
+  }
+
+  function draw(id, config) {
+    if (state.charts[id]) state.charts[id].destroy();
+    state.charts[id] = new Chart(document.getElementById(id), config);
+  }
+
+  const barColors = vals => vals.map(v => (v ?? 0) >= 0 ? css("--buy") : css("--sell"));
+
+  function renderForeignEq() {
+    const rows = inRange();
+    const vals = rows.map(r => r.in_equity_net);
+    let s = 0; const cum = vals.map(v => (s += v || 0));
+    const opts = baseOptions();
+    opts.scales.y.title = { display: true, text: "週次（億円）", color: css("--sub") };
+    opts.scales.y2 = { position: "right", ticks: { color: css("--sub") }, grid: { display: false },
+      title: { display: true, text: "累計（億円）", color: css("--sub") } };
+    opts.plugins.tooltip.callbacks.label = c => `${c.dataset.label}: ${signed(c.raw)}`;
+    draw("cForeignEq", {
+      data: {
+        labels: rows.map(r => r.week_end),
+        datasets: [
+          { type: "bar", label: "週次の売買", data: vals, backgroundColor: barColors(vals), yAxisID: "y", order: 2 },
+          { type: "line", label: "累計", data: cum, borderColor: css("--ink"), borderWidth: 1.5, pointRadius: 0, yAxisID: "y2", order: 1 },
+        ],
+      },
+      options: opts,
+    });
+  }
+
+  function cftcFor(market) {
+    return state.cftc.filter(r => r.market === market).sort((a, b) => a.report_date < b.report_date ? -1 : 1);
+  }
+
+  function renderCombo() {
+    const rows = inRange();
+    const jpy = cftcFor("JPY");
+    const sec = document.getElementById("secCombo");
+    if (!jpy.length) { sec.hidden = true; return; }
+    sec.hidden = false;
+    const byWeek = rows.map(r => {
+      const hit = jpy.find(c => c.report_date >= r.week_start && c.report_date <= r.week_end);
+      return hit ? hit.lev_net : null;
+    });
+    const vals = rows.map(r => r.in_equity_net);
+    const opts = baseOptions();
+    opts.scales.y.title = { display: true, text: "日本株（億円）", color: css("--sub") };
+    opts.scales.y2 = { position: "right", ticks: { color: css("--sub") }, grid: { display: false },
+      title: { display: true, text: "円の持ち高（枚）", color: css("--sub") } };
+    opts.plugins.tooltip.callbacks.label = c => c.datasetIndex === 0
+      ? `海外勢の日本株: ${signed(c.raw)}`
+      : `円の投機ポジション: ${c.raw == null ? "—" : Math.round(c.raw).toLocaleString("ja-JP")}枚`;
+    draw("cCombo", {
+      data: {
+        labels: rows.map(r => r.week_end),
+        datasets: [
+          { type: "bar", label: "海外勢の日本株", data: vals, backgroundColor: barColors(vals), yAxisID: "y", order: 2 },
+          { type: "line", label: "円の投機ポジション", data: byWeek, borderColor: css("--accent2"), borderWidth: 2, pointRadius: 0, spanGaps: true, yAxisID: "y2", order: 1 },
+        ],
+      },
+      options: opts,
+    });
+  }
+
+  function renderCftc() {
+    const sec = document.getElementById("secCftc");
+    if (!state.cftc.length) { sec.hidden = true; return; }
+    sec.hidden = false;
+    let rows = cftcFor(state.market);
+    if (state.range) {
+      const from = inRange()[0]?.week_start;
+      if (from) rows = rows.filter(r => r.report_date >= from);
+    }
+    const opts = baseOptions();
+    opts.plugins.tooltip.callbacks.label = c => `${c.dataset.label}: ${c.raw == null ? "—" : Math.round(c.raw).toLocaleString("ja-JP")}枚`;
+    draw("cCftc", {
+      type: "line",
+      data: {
+        labels: rows.map(r => r.report_date),
+        datasets: [
+          { label: "ヘッジファンド等", data: rows.map(r => r.lev_net), borderColor: css("--accent2"), borderWidth: 2, pointRadius: 0 },
+          { label: "機関投資家", data: rows.map(r => r.asset_mgr_net), borderColor: css("--buy"), borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
+        ],
+      },
+      options: opts,
+    });
+  }
+
+  function renderDomestic() {
+    const rows = inRange();
+    const opts = baseOptions();
+    opts.scales.x.stacked = true; opts.scales.y.stacked = true;
+    opts.scales.y.title = { display: true, text: "億円", color: css("--sub") };
+    opts.plugins.tooltip.callbacks.label = c => `${c.dataset.label}: ${signed(c.raw)}`;
+    draw("cDomestic", {
+      type: "bar",
+      data: {
+        labels: rows.map(r => r.week_end),
+        datasets: [
+          { label: "外国株", data: rows.map(r => r.out_equity_net), backgroundColor: css("--buy") },
+          { label: "外国の債券", data: rows.map(r => r.out_ltdebt_net), backgroundColor: css("--accent2") },
+        ],
+      },
+      options: opts,
+    });
+  }
+
+  function setupMarkets() {
+    const sel = document.getElementById("market");
+    const codes = [...new Set(state.cftc.map(r => r.market))];
+    if (!codes.includes(state.market)) state.market = codes[0];
+    sel.innerHTML = codes.map(c => `<option value="${c}">${MARKET_LABELS[c] || c}</option>`).join("");
+    sel.value = state.market;
+    sel.onchange = () => { state.market = sel.value; renderCftc(); };
+  }
+
+  function renderAll() {
+    if (!state.mof.length) return;
+    document.getElementById("app").hidden = false;
+    renderHero(); renderFlows();
+    renderForeignEq(); renderCombo(); renderCftc(); renderDomestic();
+  }
+
+  document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", () => {
+    state.range = Number(b.dataset.range);
+    document.querySelectorAll("[data-range]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    renderForeignEq(); renderCombo(); renderCftc(); renderDomestic();
+  }));
+
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderAll);
+
+  function readFile(input) {
+    return new Promise((res, rej) => {
+      const f = input.files[0]; if (!f) return res(null);
+      const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(f, "utf-8");
+    });
+  }
+  async function loadFromFiles() {
+    const mofText = await readFile(document.getElementById("fileMof"));
+    const cftcText = await readFile(document.getElementById("fileCftc"));
+    if (mofText) state.mof = parseCSV(mofText).sort((a, b) => a.week_start < b.week_start ? -1 : 1);
+    if (cftcText) { state.cftc = parseCSV(cftcText); setupMarkets(); }
+    if (state.mof.length) { document.getElementById("loadError").hidden = true; renderAll(); }
+  }
+  document.getElementById("fileMof").addEventListener("change", loadFromFiles);
+  document.getElementById("fileCftc").addEventListener("change", loadFromFiles);
+
+  async function fetchText(url) {
+    const res = await fetch(url, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`${url} が見つかりません（HTTP ${res.status}）`);
+    return res.text();
+  }
+
+  (async () => {
+    try {
+      state.mof = parseCSV(await fetchText(MOF_URL)).sort((a, b) => a.week_start < b.week_start ? -1 : 1);
+      if (!state.mof.length) throw new Error("mof_weekly.csv にデータ行がありません");
+    } catch (e) {
+      document.getElementById("loadErrorMsg").textContent = e.message || String(e);
+      document.getElementById("loadError").hidden = false;
+      return;
+    }
+    try { state.cftc = parseCSV(await fetchText(CFTC_URL)); setupMarkets(); }
+    catch { state.cftc = []; }
+    renderAll();
+  })();
+})();
+</script>
+</body>
+</html>
