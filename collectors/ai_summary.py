@@ -112,48 +112,78 @@ def _valid(d: dict) -> bool:
     )
 
 
+LAST_ERROR = ""  # 失敗理由（latest_summary.json に書き出してスマホから確認できるようにする）
+
+
+def _call(token: str, model: str, context: dict, json_mode: bool) -> dict:
+    body = {
+        "model": model,
+        "temperature": 0.3,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
+        ],
+    }
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    resp = requests.post(
+        ENDPOINT,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        json=body,
+        timeout=90,
+    )
+    head = resp.text[:200].replace("\n", " ")
+    if resp.status_code >= 400:
+        raise RuntimeError(f"HTTP {resp.status_code}: {head}")
+    try:
+        payload = resp.json()
+    except ValueError:
+        ctype = resp.headers.get("Content-Type", "?")
+        raise RuntimeError(f"応答がJSONではない (HTTP {resp.status_code}, {ctype}): {head!r}")
+    content = payload["choices"][0]["message"]["content"]
+    data = _parse_json(content)
+    if not _valid(data):
+        raise RuntimeError(f"出力形式が想定外: {str(data)[:200]}")
+    return data
+
+
 def summarize(mof_rows: list[dict], cftc_rows: list[dict]) -> dict | None:
+    global LAST_ERROR
+    LAST_ERROR = ""
     token = os.getenv("GITHUB_TOKEN")
     if not token:
+        LAST_ERROR = "GITHUB_TOKEN が渡されていない"
         log.info("GITHUB_TOKEN が無いので AI 要約はスキップ")
         return None
     if not mof_rows:
+        LAST_ERROR = "財務省データが無い"
         return None
 
     context = build_context(mof_rows, cftc_rows)
-    models = [m for m in [os.getenv("MONEYFLOW_AI_MODEL")] + DEFAULT_MODELS if m]
-    seen = set()
-    for model in [m for m in models if not (m in seen or seen.add(m))]:
-        try:
-            resp = requests.post(
-                ENDPOINT,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
+    seen: set[str] = set()
+    models = [m for m in [os.getenv("MONEYFLOW_AI_MODEL")] + DEFAULT_MODELS
+              if m and not (m in seen or seen.add(m))]
+    errors = []
+    for model in models:
+        for json_mode in (True, False):  # JSONモード非対応のモデルに備えて、外した形でも試す
+            try:
+                data = _call(token, model, context, json_mode)
+                return {
+                    "headline": data["headline"].strip(),
+                    "points": [p.strip() for p in data["points"] if p.strip()][:5],
+                    "watch": (data.get("watch") or "").strip(),
+                    "based_on_week": mof_rows[-1]["week_end"],
                     "model": model,
-                    "temperature": 0.3,
-                    "response_format": {"type": "json_object"},
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
-                    ],
-                },
-                timeout=90,
-            )
-            if resp.status_code >= 400:
-                log.warning("AI(%s) HTTP %s: %s", model, resp.status_code, resp.text[:300])
-                continue
-            data = _parse_json(resp.json()["choices"][0]["message"]["content"])
-            if not _valid(data):
-                log.warning("AI(%s) の出力形式が想定外: %s", model, str(data)[:300])
-                continue
-            return {
-                "headline": data["headline"].strip(),
-                "points": [p.strip() for p in data["points"] if p.strip()][:5],
-                "watch": (data.get("watch") or "").strip(),
-                "based_on_week": mof_rows[-1]["week_end"],
-                "model": model,
-                "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-            }
-        except Exception:
-            log.exception("AI(%s) の呼び出しに失敗", model)
+                    "generated_at_utc": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+                }
+            except Exception as e:
+                msg = f"{model}{'' if json_mode else '(json無し)'}: {e}"
+                log.warning("AI 失敗 %s", msg)
+                errors.append(msg[:300])
+    LAST_ERROR = " / ".join(errors)
     return None

@@ -50,6 +50,7 @@ def run_weekly() -> dict:
             summary["ai"] = ai["model"]
         else:
             summary["ai"] = "skipped"
+            summary["ai_reason"] = ai_summary.LAST_ERROR
     except Exception as e:
         log.exception("AI 要約に失敗")
         summary["ai_error"] = str(e)
