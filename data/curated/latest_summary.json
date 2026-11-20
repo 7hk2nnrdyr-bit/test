@@ -1,5 +1,5 @@
 {
-  "collected_at_utc": "2026-11-20T03:36:45.446215+00:00",
+  "collected_at_utc": "2026-11-20T04:00:44.913169+00:00",
   "mof": {
     "week": "2026-11-08〜2026-11-14",
     "海外勢_日本株_ネット億円": -2241.0,
@@ -8,7 +8,32 @@
     "国内勢_外国中長期債_ネット億円": -4407.0,
     "rows": 1141
   },
-  "cftc_error": "HTTPSConnectionPool(host='publicreporting.cftc.gov', port=443): Read timed out. (read timeout=30)",
-  "ai": "skipped",
-  "ai_reason": "openai/gpt-4.1-mini: 応答がJSONではない (HTTP 200, text/plain): 'OK\\r ' / openai/gpt-4.1-mini(json無し): 応答がJSONではない (HTTP 200, text/plain): 'OK\\r ' / openai/gpt-4o-mini: 応答がJSONではない (HTTP 200, text/plain): 'OK\\r ' / openai/gpt-4o-mini(json無し): 応答がJSONではない (HTTP 200, text/plain): 'OK\\r '"
+  "cftc": {
+    "JPY": {
+      "date": "2026-11-10",
+      "レバレッジ勢_ネット": -16855.0,
+      "前週差": -2038.0
+    },
+    "EUR": {
+      "date": "2026-11-10",
+      "レバレッジ勢_ネット": -71676.0,
+      "前週差": 6883.0
+    },
+    "SP500": {
+      "date": "2026-11-10",
+      "レバレッジ勢_ネット": -303060.0,
+      "前週差": 69258.0
+    },
+    "UST10Y": {
+      "date": "2026-11-10",
+      "レバレッジ勢_ネット": -2301327.0,
+      "前週差": -39017.0
+    },
+    "NIKKEI_YEN": {
+      "date": "2026-11-10",
+      "レバレッジ勢_ネット": 596.0,
+      "前週差": -1501.0
+    }
+  },
+  "ai": "gemini-3.8-flash"
 }
