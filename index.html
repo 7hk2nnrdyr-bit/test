@@ -82,6 +82,15 @@ section.chart .head { display: flex; justify-content: space-between; align-items
 .notice p { margin: 0 0 10px; font-size: 14px; }
 .notice label { display: block; font-size: 14px; margin-top: 8px; }
 
+.ai { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--accent2); border-radius: 10px; padding: 18px 20px 14px; margin: 0 0 32px; }
+.ai h2 { font-size: 14px; font-weight: 700; color: var(--accent2); margin: 0 0 6px; }
+.ai .ai-head { font-size: 18px; font-weight: 700; line-height: 1.6; margin: 0 0 10px; }
+.ai ul { margin: 0 0 12px; padding-left: 1.2em; }
+.ai li { margin-bottom: 6px; font-size: 15px; }
+.ai .ai-watch { font-size: 15px; margin: 0 0 12px; padding-top: 10px; border-top: 1px dashed var(--rule); }
+.ai .ai-watch b { display: block; font-size: 13px; color: var(--sub); }
+.ai .ai-note { font-size: 12px; color: var(--sub); margin: 0; }
+
 footer { font-size: 13px; color: var(--sub); margin-top: 32px; border-top: 1px solid var(--rule); padding-top: 16px; }
 footer p { margin: 0 0 6px; max-width: 46em; }
 footer a { color: inherit; }
@@ -114,6 +123,14 @@ footer a { color: inherit; }
     <div class="hero" id="hero"></div>
 
     <div class="flows" id="flows" aria-label="最新週の資金の向き"></div>
+
+    <section class="ai" id="ai" hidden aria-labelledby="aiTitle">
+      <h2 id="aiTitle">AIのまとめ</h2>
+      <p class="ai-head" id="aiHead"></p>
+      <ul id="aiPoints"></ul>
+      <p class="ai-watch" id="aiWatchWrap"><b>次に見るところ</b><span id="aiWatch"></span></p>
+      <p class="ai-note" id="aiNote"></p>
+    </section>
 
     <div class="controls" role="group" aria-label="表示期間">
       <span>期間</span>
@@ -166,9 +183,10 @@ footer a { color: inherit; }
 (() => {
   const MOF_URL = "data/curated/mof_weekly.csv";
   const CFTC_URL = "data/curated/cftc_tff.csv";
+  const AI_URL = "data/curated/ai_summary.json";
   const MARKET_LABELS = { JPY: "日本円", EUR: "ユーロ", SP500: "S&P500", UST10Y: "米10年債", NIKKEI_YEN: "日経平均（円建て）" };
 
-  const state = { mof: [], cftc: [], range: 156, market: "JPY", charts: {} };
+  const state = { mof: [], cftc: [], ai: null, range: 156, market: "JPY", charts: {} };
 
   function parseCSV(text) {
     text = text.replace(/^\uFEFF/, "");
@@ -379,10 +397,27 @@ footer a { color: inherit; }
     sel.onchange = () => { state.market = sel.value; renderCftc(); };
   }
 
+
+  function renderAI() {
+    const ai = state.ai, sec = document.getElementById("ai");
+    if (!ai || !ai.headline) { sec.hidden = true; return; }
+    sec.hidden = false;
+    document.getElementById("aiHead").textContent = ai.headline;
+    const ul = document.getElementById("aiPoints");
+    ul.replaceChildren(...(ai.points || []).map(t => { const li = document.createElement("li"); li.textContent = t; return li; }));
+    document.getElementById("aiWatch").textContent = ai.watch || "";
+    document.getElementById("aiWatchWrap").hidden = !ai.watch;
+    const last = state.mof[state.mof.length - 1];
+    const stale = last && ai.based_on_week && ai.based_on_week !== last.week_end
+      ? `（${ai.based_on_week.replaceAll("-", "/")} 週時点の内容です）` : "";
+    document.getElementById("aiNote").textContent =
+      `AIが数値から自動で作った要約です。誤りを含むことがあり、売買をすすめるものではありません。${stale}`;
+  }
+
   function renderAll() {
     if (!state.mof.length) return;
     document.getElementById("app").hidden = false;
-    renderHero(); renderFlows();
+    renderHero(); renderFlows(); renderAI();
     renderForeignEq(); renderCombo(); renderCftc(); renderDomestic();
   }
 
@@ -427,6 +462,8 @@ footer a { color: inherit; }
     }
     try { state.cftc = parseCSV(await fetchText(CFTC_URL)); setupMarkets(); }
     catch { state.cftc = []; }
+    try { state.ai = JSON.parse(await fetchText(AI_URL)); }
+    catch { state.ai = null; }
     renderAll();
   })();
 })();
